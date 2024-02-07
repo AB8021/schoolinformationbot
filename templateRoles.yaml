@@ -1,0 +1,771 @@
+﻿Resources:
+  ChatbotRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: 'ChatbotRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'ChatbotPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                Resource: '*'
+  schoolInfoTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: schoolInfoTable
+      AttributeDefinitions:
+        - AttributeName: class
+          AttributeType: S
+      KeySchema:
+        - AttributeName: class
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+  schoolErrorsTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: schoolErrorsTable
+      AttributeDefinitions:
+        - AttributeName: errorId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: errorId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+  schoolInformationBot:
+    DependsOn: ChatbotRole
+    Type: 'AWS::Lex::Bot'
+    Properties:
+      Name: InfoAboutSchool
+      DataPrivacy:
+        ChildDirected: false
+      IdleSessionTTLInSeconds: 300
+      RoleArn: !GetAtt ChatbotRole.Arn
+      AutoBuildBotLocales: false
+      BotLocales:
+        - LocaleId: en_US
+          NluConfidenceThreshold: 0.4
+          SlotTypes:
+            - Name: BrokenObjectValues
+              SlotTypeValues:
+                - SampleValue:
+                    Value: sink
+                - SampleValue:
+                    Value: water
+                - SampleValue:
+                    Value: light
+                - SampleValue:
+                    Value: door
+                - SampleValue:
+                    Value: window
+                - SampleValue:
+                    Value: faucet
+                - SampleValue:
+                    Value: toilet
+                - SampleValue:
+                    Value: bidet
+              ValueSelectionSetting:
+                ResolutionStrategy: ORIGINAL_VALUE
+            - Name: CourseListValue
+              SlotTypeValues:
+                - SampleValue:
+                    Value: Math
+                - SampleValue:
+                    Value: Physics
+                - SampleValue:
+                    Value: Biology
+              ValueSelectionSetting:
+                ResolutionStrategy: ORIGINAL_VALUE
+            - Name: locationValues
+              SlotTypeValues:
+                - SampleValue:
+                    Value: Class A
+                - SampleValue:
+                    Value: Class B
+                - SampleValue:
+                    Value: Class C
+                - SampleValue:
+                    Value: Gym
+                - SampleValue:
+                    Value: Cafeteria
+                - SampleValue:
+                    Value: Entry Hall
+              ValueSelectionSetting:
+                ResolutionStrategy: ORIGINAL_VALUE
+          Intents:
+            - Name: infoAboutClasses
+              Description: Tells user about classes
+              SampleUtterances:
+                - Utterance: What classes there are?
+                - Utterance: what classes I can take?
+                - Utterance: list of classes
+                - Utterance: class list
+                - Utterance: courses
+                - Utterance: what courses there are
+                - Utterance: what courses I can take
+                - Utterance: 'tell me about {Course}'
+              DialogCodeHook:
+                Enabled: true
+              SlotPriorities:
+                - Priority: 1
+                  SlotName: Course
+              Slots:
+                - Name: Course
+                  SlotTypeName: CourseListValue
+                  ValueElicitationSetting:
+                    SlotCaptureSetting:
+                      CaptureNextStep:
+                        DialogAction:
+                          Type: EndConversation
+                      FailureNextStep:
+                        Intent:
+                          Name: FallbackIntent
+                        DialogAction:
+                          Type: StartIntent
+                      ElicitationCodeHook:
+                        EnableCodeHookInvocation: true
+                    PromptSpecification:
+                      MessageGroupsList:
+                        - Message:
+                            PlainTextMessage:
+                              Value: >-
+                                Our courses are: do you want more information
+                                about any of them?
+                      MaxRetries: 4
+                      AllowInterrupt: true
+                      MessageSelectionStrategy: Random
+                    SlotConstraint: Required
+                  MultipleValuesSetting:
+                    AllowMultipleValues: false
+            - Name: errorReportingIntent
+              SampleUtterances:
+                - Utterance: something is broken
+                - Utterance: broken thing
+                - Utterance: '{brokenObject} doesnt work'
+                - Utterance: something needs fixing
+                - Utterance: '{brokenObject} needs to be fixed'
+              InitialResponseSetting:
+                NextStep:
+                  DialogAction:
+                    Type: InvokeDialogCodeHook
+                CodeHook:
+                  IsActive: true
+                  EnableCodeHookInvocation: true
+                  PostCodeHookSpecification:
+                    TimeoutNextStep:
+                      DialogAction:
+                        Type: EndConversation
+                    FailureNextStep:
+                      DialogAction:
+                        Type: EndConversation
+                    SuccessNextStep:
+                      DialogAction:
+                        Type: ElicitSlot
+                        SlotToElicit: brokenObject
+              DialogCodeHook:
+                Enabled: true
+              SlotPriorities:
+                - Priority: 2
+                  SlotName: locationAsk
+                - Priority: 1
+                  SlotName: brokenObject
+              Slots:
+                - Name: brokenObject
+                  SlotTypeName: BrokenObjectValues
+                  ValueElicitationSetting:
+                    SlotCaptureSetting:
+                      CaptureNextStep:
+                        DialogAction:
+                          Type: ElicitSlot
+                          SlotToElicit: locationAsk
+                      FailureNextStep:
+                        Intent:
+                          Name: FallbackIntent
+                        DialogAction:
+                          Type: StartIntent
+                      ElicitationCodeHook:
+                        EnableCodeHookInvocation: true
+                    PromptSpecification:
+                      MessageGroupsList:
+                        - Message:
+                            PlainTextMessage:
+                              Value: Something is broken? Can you tell me what is it?
+                      MaxRetries: 4
+                      AllowInterrupt: true
+                      MessageSelectionStrategy: Random
+                    SlotConstraint: Required
+                - Name: locationAsk
+                  SlotTypeName: locationValues
+                  ValueElicitationSetting:
+                    SlotCaptureSetting:
+                      CaptureNextStep:
+                        DialogAction:
+                          Type: EndConversation
+                      FailureNextStep:
+                        Intent:
+                          Name: FallbackIntent
+                        DialogAction:
+                          Type: StartIntent
+                      ElicitationCodeHook:
+                        EnableCodeHookInvocation: true
+                    PromptSpecification:
+                      MessageGroupsList:
+                        - Message:
+                            PlainTextMessage:
+                              Value: >-
+                                Alright, just tell me where it is and someone
+                                will take a look when they're able
+                      MaxRetries: 4
+                      AllowInterrupt: true
+                      MessageSelectionStrategy: Random
+                    SlotConstraint: Required
+            - Name: FallbackIntent
+              Description: Default Intent when no other Intent matches
+              ParentIntentSignature: AMAZON.FallbackIntent
+
+  SchoolInformationBotVersion1:
+    DependsOn: schoolInformationBot
+    Type: 'AWS::Lex::BotVersion'
+    Properties:
+      BotId: !Ref schoolInformationBot
+      BotVersionLocaleSpecification:
+        - LocaleId: en_US
+          BotVersionLocaleDetails:
+            SourceBotVersion: DRAFT
+      Description: BookTrip Version 1
+  SchoolInformationBotAlias1:
+    DependsOn: SchoolInformationBotVersion1
+    Type: 'AWS::Lex::BotAlias'
+    Properties:
+      BotId: !Ref schoolInformationBot
+      BotAliasName: SchoolBotAlias
+      BotAliasLocaleSettings:
+        - LocaleId: en_US
+          BotAliasLocaleSetting:
+            Enabled: true
+            CodeHookSpecification:
+              LambdaCodeHook:
+                CodeHookInterfaceVersion: '1.0'
+                LambdaArn: !GetAtt
+                  - englishLexManagementFunction
+                  - Arn
+      BotVersion: !GetAtt
+        - SchoolInformationBotVersion1
+        - BotVersion
+  LambdaFunction1Role:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: 'LambdaFunction1Role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'LambdaFunction1Policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:UpdateItem'
+                  - 'dynamodb:DeleteItem'
+                Resource: '*'
+  englishLexManagementFunction:
+    DependsOn: LambdaFunction1Role
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: englishLexManagementFunction
+      Runtime: python3.8
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaFunction1Role.Arn
+      Code:
+        ZipFile: |
+          import json
+          import uuid
+          import boto3
+          import time
+          import os
+
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.DEBUG)
+
+
+          dynamodb = boto3.resource("dynamodb")
+
+
+          table = dynamodb.Table("schoolInfoTable")
+          table2 = dynamodb.Table("schoolErrorsTable")
+          response = table.scan()
+          items = response["Items"]
+          courses = [item["class"] for item in items]
+
+
+          def class_information(intent_request):
+              class_name = intent_request["transcriptions"][0]["resolvedSlots"]
+              source = intent_request["invocationSource"]
+
+              if source == "DialogCodeHook":
+                  if not class_name:
+                      return {
+                          "sessionState": {
+                              "sessionAttributes": {},
+                              "dialogAction": {
+                                  "type": "ElicitSlot",
+                                  "slotToElicit": "Course",
+                              },
+                              "intent": {
+                                  "name": "infoAboutClasses",
+                                  "slots": {
+                                      "Course": {
+                                          "value": {
+                                              "interpretedValue": "",
+                                              "originalValue": "",
+                                              "resolvedValues": [],
+                                          }
+                                      }
+                                  },
+                                  "state": "InProgress",
+                              },
+                          },
+                          "messages": [
+                              {
+                                  "contentType": "PlainText",
+                                  "content": "The courses are: "
+                                  + ", ".join(courses)
+                                  + ". Which one would you like more info of?",
+                              }
+                          ],
+                          "requestAttributes": {},
+                      }
+
+                  if class_name:
+                      for item in items:
+                          if item["class"] == class_name["Course"]["value"]["originalValue"]:
+                              return {
+                                  "sessionState": {
+                                      "sessionAttributes": {},
+                                      "dialogAction": {
+                                          "type": "ElicitSlot",
+                                          "slotToElicit": "Course",
+                                      },
+                                      "intent": {
+                                          "name": "infoAboutClasses",
+                                          "slots": {
+                                              "Course": {
+                                                  "value": {
+                                                      "interpretedValue": "",
+                                                      "originalValue": "",
+                                                      "resolvedValues": [],
+                                                  }
+                                              }
+                                          },
+                                          "state": "InProgress",
+                                      },
+                                  },
+                                  "messages": [
+                                      {
+                                          "contentType": "PlainText",
+                                          "content": f"The teacher for {class_name['Course']['value']['originalValue']} is {item['teacher']}",
+                                      }
+                                  ],
+                                  "requestAttributes": {},
+                              }
+                      return {
+                          "sessionState": {
+                              "sessionAttributes": {},
+                              "dialogAction": {
+                                  "type": "ElicitSlot",
+                                  "slotToElicit": "Course",
+                              },
+                              "intent": {
+                                  "name": "infoAboutClasses",
+                                  "slots": {
+                                      "Course": {
+                                          "value": {
+                                              "interpretedValue": "",
+                                              "originalValue": "",
+                                              "resolvedValues": [],
+                                          }
+                                      }
+                                  },
+                                  "state": "InProgress",
+                              },
+                          },
+                          "messages": [
+                              {
+                                  "contentType": "PlainText",
+                                  "content": f"I could not find course {class_name['Course']['value']['originalValue']}",
+                              }
+                          ],
+                          "requestAttributes": {},
+                      }
+
+
+          def error_report(intent_request):
+              slots = intent_request["interpretations"][0]["intent"]["slots"]
+              source = intent_request["invocationSource"]
+              logger.debug(slots)
+              if source == "DialogCodeHook":
+                  if not slots["brokenObject"]:
+                      return {
+                          f"sessionState": {
+                              "sessionAttributes": {},
+                              "dialogAction": {
+                                  "type": "ElicitSlot",
+                                  "slotToElicit": "brokenObject",
+                              },
+                              "intent": {
+                                  "name": "errorReportingIntent",
+                                  "slots": {
+                                      "brokenObject": {
+                                          "value": {
+                                              "interpretedValue": "",
+                                              "originalValue": "",
+                                              "resolvedValues": [],
+                                          }
+                                      }
+                                  },
+                                  "state": "InProgress",
+                              },
+                          },
+                          "messages": [
+                              {
+                                  "contentType": "PlainText",
+                                  "content": "That's probably not good. Mind telling me what it is?",
+                              }
+                          ],
+                          "requestAttributes": {},
+                      }
+
+                  if slots["brokenObject"] and not slots["locationAsk"]:
+                      return {
+                          "sessionState": {
+                              "sessionAttributes": {},
+                              "dialogAction": {
+                                  "type": "ElicitSlot",
+                                  "slots": slots,
+                                  "slotToElicit": "locationAsk",
+                              },
+                              "intent": {
+                                  "name": "errorReportingIntent",
+                                  "slots": slots,
+                                  "state": "InProgress",
+                              },
+                          },
+                          "messages": [
+                              {
+                                  "contentType": "PlainText",
+                                  "content": f"{slots['brokenObject']['value']['originalValue']} broken? got it, tell me where.",
+                              }
+                          ],
+                          "requestAttributes": {},
+                      }
+                  if slots["brokenObject"] and slots["locationAsk"]:
+                      data = {
+                          "errorId": str(uuid.uuid4()),
+                          "brokenObject": str(slots["brokenObject"]["value"]["originalValue"]),
+                          "objectLocation": str(slots["locationAsk"]["value"]["originalValue"]),
+                      }
+                      table2.put_item(Item=data)
+                      return {
+                          "sessionState": {
+                              "sessionAttributes": {},
+                              "dialogAction": {
+                                  "type": "ElicitSlot",
+                                  "slots": slots,
+                                  "slotToElicit": "locationAsk",
+                              },
+                              "intent": {
+                                  "name": "errorReportingIntent",
+                                  "slots": slots,
+                                  "state": "Fulfilled",
+                              },
+                          },
+                          "messages": [
+                              {
+                                  "contentType": "PlainText",
+                                  "content": f"{slots['brokenObject']['value']['originalValue']} broken in a {slots['locationAsk']['value']['originalValue']}. Got it. I'll mark it down and someone will take a look",
+                              }
+                          ],
+                          "requestAttributes": {},
+                      }
+
+
+          def dispatch(intent_request):
+              logger.debug(intent_request)
+
+              intent_name = intent_request["transcriptions"][0]["resolvedContext"]["intent"]
+
+              if intent_name == "infoAboutClasses":
+                  return class_information(intent_request)
+              if intent_name == "errorReportingIntent":
+                  return error_report(intent_request)
+              raise Exception("Intent with name " + intent_name + " not supported")
+
+
+          def lambda_handler(event, context):
+              os.environ["TZ"] = "America/New_York"
+              time.tzset()
+
+              return dispatch(event)
+  LambdaFunction3Role:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: 'LambdaFunction3Role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'LambdaFunction3Policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'execute-api:Invoke'
+                  - 'lambda:InvokeFunction'
+                Resource: '*'
+  LexGatewayCommunicationFunction:
+    DependsOn: [schoolInformationBot, SchoolInformationBotAlias1, LambdaFunction3Role]
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: LexGatewayCommunicationFunction
+      Runtime: python3.8
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaFunction3Role.Arn
+      Environment:
+        Variables:
+          BotId: !Ref schoolInformationBot
+          BotAliasId: !GetAtt SchoolInformationBotAlias1.BotAliasId
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import os
+          import logging
+          logger = logging.getLogger()
+          logger.setLevel(logging.DEBUG)
+
+          def lambda_handler(event, context):
+              connectionId = event["requestContext"].get("connectionId")
+              client = boto3.client("lexv2-runtime")
+              gatewayapi = boto3.client(
+                  "apigatewaymanagementapi",
+                  endpoint_url=f"https://{event['requestContext']['domainName']}/{event['requestContext']['stage']}",
+              )
+              if event["requestContext"]["eventType"] == "CONNECT":
+                  return {"statusCode": 200}
+              elif event["requestContext"]["eventType"] == "DISCONNECT":
+                  return {"statusCode": 200}
+              else:
+                  logger.debug(event['body'])
+                  
+                  response = client.recognize_text(
+                      botId=os.environ['BotId'],
+                      botAliasId=os.environ['BotAliasId'],
+                      localeId="en_US",
+                      sessionId="superWowSession",
+                      text=event['body'],
+                  )
+
+                  gatewayapi.post_to_connection(
+                      ConnectionId=connectionId, Data=response["messages"][0]["content"]
+                  )
+
+                  return {"statusCode": 200}
+  LambdaFunction2Role:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: 'LambdaFunction2Role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'LambdaFunction2Policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                Resource: '*'
+
+  InitialDynamoDBDataFunction:
+    DependsOn: [LambdaFunction2Role, schoolInfotable]
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaFunction2Role.Arn
+      Runtime: python3.8
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import cfnresponse
+          import traceback
+
+          def lambda_handler(event, context):
+              responseData = {}
+              try:
+                  dynamodb = boto3.resource('dynamodb')
+                  table = dynamodb.Table('schoolInfoTable')
+
+                  with table.batch_writer() as batch:
+                      batch.put_item(Item={'class': 'biology', 'teacher': 'Firstername Lastson'})
+                      batch.put_item(Item={'class': 'physics', 'teacher': 'Firstman Lastlast'})
+                      batch.put_item(Item={'class': 'math', 'teacher': 'Testname Lastname'})
+
+                  responseData['message'] = "Data added to DynamoDB table successfully!"
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+              except Exception as e:
+                  responseData['Error'] = str(e)
+                  responseData['StackTrace'] = traceback.format_exc()
+                  cfnresponse.send(event, context, cfnresponse.FAILED, responseData)
+
+  InitialDynamoDBDataTrigger:
+    Type: 'Custom::InitialDynamoDBData'
+    Properties:
+      ServiceToken: !GetAtt
+        - InitialDynamoDBDataFunction
+        - Arn
+
+  LexGateway:
+    Type: 'AWS::ApiGatewayV2::Api'
+    Properties:
+      Name: LexGateway
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+  ConnectRoute:
+    Type: 'AWS::ApiGatewayV2::Route'
+    Properties:
+      ApiId: !Ref LexGateway
+      RouteKey: $connect
+      AuthorizationType: NONE
+      OperationName: ConnectRoute
+      Target: !Sub 'integrations/${ConnectIntegration}'
+  ConnectIntegration:
+    Type: 'AWS::ApiGatewayV2::Integration'
+    Properties:
+      ApiId: !Ref LexGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub
+        - >-
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LexGatewayCommunicationFunction.Arn}/invocations
+        - ConnectLambda: !GetAtt
+            - LexGatewayCommunicationFunction
+            - Arn
+  DisconnectRoute:
+    Type: 'AWS::ApiGatewayV2::Route'
+    Properties:
+      ApiId: !Ref LexGateway
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      OperationName: DisconnectRoute
+      Target: !Sub 'integrations/${DisconnectIntegration}'
+  DisconnectIntegration:
+    Type: 'AWS::ApiGatewayV2::Integration'
+    Properties:
+      ApiId: !Ref LexGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub
+        - >-
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LexGatewayCommunicationFunction.Arn}/invocations
+        - DisconnectLambda: !GetAtt
+            - LexGatewayCommunicationFunction
+            - Arn
+  DefaultRoute:
+    Type: 'AWS::ApiGatewayV2::Route'
+    Properties:
+      ApiId: !Ref LexGateway
+      RouteKey: $default
+      AuthorizationType: NONE
+      OperationName: DefaultRoute
+      Target: !Sub 'integrations/${DefaultIntegration}'
+  DefaultIntegration:
+    Type: 'AWS::ApiGatewayV2::Integration'
+    Properties:
+      ApiId: !Ref LexGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub
+        - >-
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LexGatewayCommunicationFunction.Arn}/invocations
+        - DefaultLambda: !GetAtt
+            - LexGatewayCommunicationFunction
+            - Arn
+  Deployment:
+    Type: 'AWS::ApiGatewayV2::Deployment'
+    DependsOn:
+      - ConnectRoute
+      - DisconnectRoute
+      - DefaultRoute
+    Properties:
+      ApiId: !Ref LexGateway
+  Stage:
+    Type: 'AWS::ApiGatewayV2::Stage'
+    Properties:
+      ApiId: !Ref LexGateway
+      DeploymentId: !Ref Deployment
+      StageName: Prod
+  ConnectLambdaPermission:
+    DependsOn: [LexGatewayCommunicationFunction, LexGateway]
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt LexGatewayCommunicationFunction.Arn
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${LexGateway}/*/$connect'
+
+  DisconnectLambdaPermission:
+    DependsOn: [LexGatewayCommunicationFunction, LexGateway]
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt LexGatewayCommunicationFunction.Arn
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${LexGateway}/*/$disconnect'
+
+  DefaultLambdaPermission:
+    DependsOn: [LexGatewayCommunicationFunction, LexGateway]
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt LexGatewayCommunicationFunction.Arn
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${LexGateway}/*/$default'
+
+  LambdaInvokePermissionLex:
+    DependsOn: [englishLexManagementFunction, SchoolInformationBotAlias1]
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt englishLexManagementFunction.Arn
+      Principal: 'lexv2.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:lex:${AWS::Region}:${AWS::AccountId}:bot-alias/${schoolInformationBot}/${SchoolInformationBotAlias1.BotAliasId}'
